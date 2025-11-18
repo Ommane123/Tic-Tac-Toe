@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tic‑Tac‑Toe — AI</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#06b6d4;--muted:#9aa8b2;--white:#e6eef6}
+    *{box-sizing:border-box}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#052031, #071a26);color:var(--white)}
+    .wrap{width:min(880px,96%);padding:20px}
+    .card{background:rgba(255,255,255,0.03);padding:18px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
+    h1{margin:0 0 6px;font-size:20px}
+    h2.project{margin:0 0 10px;font-size:14px;color:var(--muted);letter-spacing:0.6px}
+    p.lead{margin:0 0 14px;color:var(--muted)}
+
+    .board{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:340px;height:340px;margin:18px auto}
+    .cell{background:rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:center;font-size:72px;border-radius:10px;cursor:pointer;user-select:none;transition:transform .08s ease,background .12s}
+    .cell:hover{transform:translateY(-3px)}
+    .cell.disabled{cursor:default;opacity:.85}
+    .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center}
+    .btn{background:var(--card);border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:10px;color:var(--white);cursor:pointer}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),#60a5fa)}
+    .row{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:12px}
+    .status{margin-top:12px;text-align:center;color:var(--muted)}
+    .flex-between{display:flex;justify-content:space-between;align-items:center}
+    .small{font-size:13px;color:var(--muted)}
+    .options{display:flex;gap:8px;align-items:center}
+    .badge{background:rgba(255,255,255,0.04);padding:6px 10px;border-radius:999px;font-weight:600}
+
+    /* Modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:50;}
+    .modal{background:var(--card);padding:20px;border-radius:12px;min-width:260px;box-shadow:0 10px 40px rgba(2,6,23,0.6);text-align:center}
+    .modal h3{margin:0 0 6px}
+    .modal p{color:var(--muted);margin:0 0 12px}
+    .modal .actions{display:flex;gap:8px;justify-content:center}
+
+    /* simple confetti (falling squares) */
+    .confetti-piece{position:fixed;z-index:60;pointer-events:none;width:12px;height:12px;opacity:0.95;border-radius:2px}
+    @keyframes fall {
+      0% { transform: translateY(-10vh) rotate(0deg); opacity:1 }
+      100% { transform: translateY(110vh) rotate(720deg); opacity:0.9 }
+    }
+
+    @media (max-width:520px){.board{width:94vw;height:94vw}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="flex-between">
+        <div>
+          <h2 class="project">AI Course Project</h2>
+          <h1>Tic‑Tac‑Toe — Play vs AI</h1>
+          <p class="lead">Play against an AI (Minimax + alpha‑beta). Perfect play on Hard; Randomized on Easy.</p>
+        </div>
+        <div class="options">
+          <div class="small">Mode:</div>
+          <select id="difficulty" class="btn" aria-label="difficulty">
+            <option value="hard">Hard (optimal)</option>
+            <option value="easy">Easy (some randomness)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="board" class="board" aria-label="tic tac toe board"></div>
+
+      <div class="row controls">
+        <button id="newBtn" class="btn primary">New Game</button>
+        <button id="toggleBtn" class="btn">Toggle First Player</button>
+        <div class="badge" id="score">You: 0 • AI: 0 • Draws: 0</div>
+      </div>
+
+      <div class="status" id="status">Click a cell to play.</div>
+      <div class="small" style="text-align:center;margin-top:8px">Code: Single page — save as <code>index.html</code> and host on GitHub Pages.</div>
+    </div>
+  </div>
+
+  <!-- Modal placeholder -->
+  <div id="modal-root" style="display:none"></div>
+
+<script>
+// --- Game + AI implementation (Minimax with alpha-beta pruning) ---
+const boardEl = document.getElementById('board');
+const newBtn = document.getElementById('newBtn');
+const toggleBtn = document.getElementById('toggleBtn');
+const statusEl = document.getElementById('status');
+const difficultyEl = document.getElementById('difficulty');
+const scoreEl = document.getElementById('score');
+const modalRoot = document.getElementById('modal-root');
+
+let board = Array(9).fill(null); // null, 'X', 'O'
+let human = 'X', ai = 'O';
+let humanFirst = true;
+let gameOver = false;
+let scores = {human:0, ai:0, draw:0};
+
+const WIN_LINES = [ [0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6] ];
+
+function render(){
+  boardEl.innerHTML = '';
+  board.forEach((cell, i) => {
+    const el = document.createElement('div');
+    el.className = 'cell' + (cell ? ' disabled' : '');
+    el.dataset.index = i;
+    el.innerText = cell || '';
+    el.addEventListener('click', () => cellClick(i));
+    boardEl.appendChild(el);
+  });
+}
+
+function resetBoard(){
+  board = Array(9).fill(null);
+  gameOver = false;
+  render();
+  statusEl.textContent = humanFirst ? "Your turn (X)" : "AI thinking...";
+  if(!humanFirst) setTimeout(() => aiMove(), 300);
+}
+
+function toggleFirst(){ humanFirst = !humanFirst; human = humanFirst ? 'X':'O'; ai = humanFirst ? 'O':'X'; resetBoard(); }
+
+function cellClick(i){
+  if(gameOver) return;
+  if(board[i]) return;
+  board[i] = human;
+  afterMove();
+}
+
+function afterMove(){
+  render();
+  const w = winner(board);
+  if(w){ finish(w); return; }
+  statusEl.textContent = 'AI thinking...';
+  setTimeout(() => aiMove(), 200);
+}
+
+function aiMove(){
+  if(gameOver) return;
+  const diff = difficultyEl.value;
+  let mv;
+  if(diff === 'easy'){
+    if(Math.random() < 0.35){
+      const avail = availableMoves(board);
+      mv = avail[Math.floor(Math.random()*avail.length)];
+    } else mv = bestMove(board, ai);
+  } else {
+    mv = bestMove(board, ai);
+  }
+  if(mv === undefined || mv === null){ finish('draw'); return; }
+  board[mv] = ai;
+  render();
+  const w = winner(board);
+  if(w){ finish(w); return; }
+  statusEl.textContent = 'Your turn';
+}
+
+function finish(w){
+  gameOver = true;
+  if(w === 'draw'){
+    statusEl.textContent = 'Game drawn.'; scores.draw++;
+    showResultModal('Draw', 'It\'s a draw. Play again?');
+  } else if(w === human){
+    statusEl.textContent = 'You win!'; scores.human++;
+    showConfetti();
+    showResultModal('You Win!', 'Congratulations — you beat the AI. Play again?');
+  } else {
+    statusEl.textContent = 'AI wins.'; scores.ai++;
+    showConfetti();
+    showResultModal('AI Wins', 'The AI won this round. Try again?');
+  }
+  updateScore();
+}
+
+function updateScore(){ scoreEl.textContent = `You: ${scores.human} • AI: ${scores.ai} • Draws: ${scores.draw}` }
+
+function availableMoves(b){ return b.map((v,i)=> v?null:i).filter(v=>v!==null); }
+
+function winner(b){
+  for(const [a,c,d] of WIN_LINES){
+    if(b[a] && b[a] === b[c] && b[a] === b[d]) return b[a];
+  }
+  return b.includes(null) ? null : 'draw';
+}
+
+// Minimax w/ alpha-beta pruning
+function bestMove(b, player){
+  const maximizing = (player === ai);
+  let bestVal = maximizing ? -Infinity : Infinity;
+  let bestIdx = null;
+  for(const mv of availableMoves(b)){
+    b[mv] = player;
+    const val = minimax(b, 0, -Infinity, Infinity, !maximizing);
+    b[mv] = null;
+    if(maximizing){ if(val > bestVal){ bestVal = val; bestIdx = mv; } }
+    else { if(val < bestVal){ bestVal = val; bestIdx = mv; } }
+  }
+  return bestIdx;
+}
+
+function minimax(b, depth, alpha, beta, isMinimizing){
+  const w = winner(b);
+  if(w){
+    if(w === 'draw') return 0;
+    return w === ai ? 10 - depth : depth - 10;
+  }
+
+  if(isMinimizing){
+    let best = Infinity;
+    for(const mv of availableMoves(b)){
+      b[mv] = human;
+      const val = minimax(b, depth+1, alpha, beta, false);
+      b[mv] = null;
+      best = Math.min(best, val);
+      beta = Math.min(beta, best);
+      if(beta <= alpha) break;
+    }
+    return best;
+  } else {
+    let best = -Infinity;
+    for(const mv of availableMoves(b)){
+      b[mv] = ai;
+      const val = minimax(b, depth+1, alpha, beta, true);
+      b[mv] = null;
+      best = Math.max(best, val);
+      alpha = Math.max(alpha, best);
+      if(beta <= alpha) break;
+    }
+    return best;
+  }
+}
+
+// --- UI: Modal + Confetti ---
+function showResultModal(title, text){
+  // clear any existing modal
+  modalRoot.innerHTML = '';
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `<h3>${title}</h3><p>${text}</p>`;
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const playBtn = document.createElement('button');
+  playBtn.className = 'btn primary';
+  playBtn.textContent = 'Play Again';
+  playBtn.onclick = () => { modalRoot.style.display='none'; modalRoot.innerHTML=''; resetBoard(); };
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = () => { modalRoot.style.display='none'; modalRoot.innerHTML=''; };
+
+  actions.appendChild(playBtn);
+  actions.appendChild(closeBtn);
+  modal.appendChild(actions);
+  backdrop.appendChild(modal);
+  modalRoot.appendChild(backdrop);
+  modalRoot.style.display = 'block';
+}
+
+function showConfetti(){
+  const colors = ['#ef4444','#f97316','#f59e0b','#22c55e','#06b6d4','#3b82f6','#8b5cf6'];
+  const count = 80;
+  for(let i=0;i<count;i++){
+    const el = document.createElement('div');
+    el.className = 'confetti-piece';
+    el.style.left = `${Math.random()*100}vw`;
+    el.style.top = `-10vh`;
+    el.style.background = colors[Math.floor(Math.random()*colors.length)];
+    el.style.width = `${8+Math.random()*10}px`;
+    el.style.height = `${8+Math.random()*10}px`;
+    el.style.opacity = 0.95;
+    const duration = 2000 + Math.random()*2000;
+    el.style.transition = `transform ${duration}ms linear, opacity ${duration}ms linear`;
+    el.style.transform = `translateY(0) rotate(0deg)`;
+    document.body.appendChild(el);
+
+    // trigger falling animation via requestAnimationFrame
+    (function(el, dur){
+      // random horizontal drift
+      const drift = (Math.random()-0.5)*60;
+      const rotate = (Math.random()<0.5?1:-1)*(720 + Math.random()*720);
+      requestAnimationFrame(()=>{
+        el.style.transform = `translate(${drift}vw, 110vh) rotate(${rotate}deg)`;
+      });
+      setTimeout(()=>{ el.remove(); }, dur);
+    })(el, duration);
+  }
+}
+
+// Init UI hooks
+newBtn.addEventListener('click', resetBoard);
+toggleBtn.addEventListener('click', () => { toggleFirst(); });
+
+difficultyEl.addEventListener('change', () => { /* no-op */ });
+
+// Initial render & reset
+render();
+resetBoard();
+updateScore();
+</script>
+</body>
+</html>
